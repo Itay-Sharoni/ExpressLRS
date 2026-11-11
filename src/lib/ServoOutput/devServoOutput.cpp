@@ -7,6 +7,9 @@
 #include "crsf_protocol.h"
 #include "logging.h"
 #include "rxtx_intf.h"
+#if defined(PLATFORM_ESP32)
+#include "devLED.h"
+#endif
 
 #if defined(PLATFORM_ESP32)
 #include <driver/periph_ctrl.h>
@@ -110,6 +113,15 @@ static void servoWrite(uint8_t ch, uint16_t us)
     {
         servoWriteDshot(chMode, ch, us);
     }
+#if defined(PLATFORM_ESP32)
+    else if (chMode == somPwm)
+    {
+        if (servoPins[ch] != UNDEF_PIN && rgbLedStripSetUs(us))
+        {
+            pwmChannelValues[ch] = us;
+        }
+    }
+#endif
     else if (servoPins[ch] != UNDEF_PIN && pwmChannelValues[ch] != us)
     {
         pwmChannelValues[ch] = us;
@@ -260,7 +272,11 @@ static bool initialize()
 #endif
         // Mark servo pins that are being used for serial (or other purposes) as disconnected
         auto mode = (eServoOutputMode)config.GetPwmChannel(ch)->val.mode;
+#if defined(PLATFORM_ESP32)
+        if (mode >= somSerial && mode != somPwm)
+#else
         if (mode >= somSerial)
+#endif
         {
             pin = UNDEF_PIN;
         }
@@ -341,6 +357,13 @@ static int event()
                 pwmChannels[ch] = PWM.allocate(servoPins[ch], frequency);
             }
 #if defined(PLATFORM_ESP32)
+            else if ((eServoOutputMode)chConfig->val.mode == somPwm && servoPins[ch] != UNDEF_PIN)
+            {
+                if (!rgbLedStripInit(servoPins[ch]))
+                {
+                    servoPins[ch] = UNDEF_PIN;
+                }
+            }
             else if ((eServoOutputMode)chConfig->val.mode == somDShot || (eServoOutputMode)chConfig->val.mode == somDShot3D)
             {
                 dshotInstances[ch]->begin(DSHOT300, false); // Set DShot protocol and bidirectional DShot bool

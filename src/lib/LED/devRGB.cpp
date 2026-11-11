@@ -330,6 +330,135 @@ static int blinkyUpdate() {
     return 3000/(256/hueStepValue);
 }
 
+
+#if defined(TARGET_RX) && defined(PLATFORM_ESP32)
+// Inclusive us ranges. Guards between bands hold the last colour (hysteresis).
+// The strip driver is always GRB on the wire (WS2812 / Betaflight default).
+// Band          us               RGB (brightness 128)
+// Off           0-1059           00 00 00
+// (guard)       1060-1079
+// Red           1080-1179        80 00 00
+// (guard)       1180-1199
+// Orange        1200-1299        80 40 00
+// (guard)       1300-1319
+// Yellow        1320-1419        80 80 00
+// (guard)       1420-1439
+// Green         1440-1539        00 80 00
+// (guard)       1540-1559
+// Cyan          1560-1659        00 80 80
+// (guard)       1660-1679
+// Blue          1680-1779        00 00 80
+// (guard)       1780-1799
+// Magenta       1800-1899        80 00 80
+// (guard)       1900-1919
+// White         1920 and up      80 80 80
+static constexpr uint16_t LED_STRIP_OFF_US = 1060;
+static constexpr uint16_t LED_STRIP_FIRST_US = 1080;
+static constexpr uint16_t LED_STRIP_BAND_US = 120;
+static constexpr uint16_t LED_STRIP_GUARD_US = 20;
+static constexpr uint32_t LED_STRIP_MIN_INTERVAL_MS = 20;
+
+static const uint8_t LED_STRIP_RGB[][3] = {
+    {0, 0, 0},
+    {128, 0, 0},
+    {128, 64, 0},
+    {128, 128, 0},
+    {0, 128, 0},
+    {0, 128, 128},
+    {0, 0, 128},
+    {128, 0, 128},
+    {128, 128, 128}
+};
+static constexpr uint8_t LED_STRIP_BAND_COUNT = sizeof(LED_STRIP_RGB) / sizeof(LED_STRIP_RGB[0]);
+static constexpr uint8_t LED_STRIP_COLOUR_COUNT = LED_STRIP_BAND_COUNT - 1; // red..white
+static constexpr uint8_t LED_STRIP_WHITE = LED_STRIP_BAND_COUNT - 1;
+
+static ESP32LedDriverGRB *ledStrip;
+static int8_t stripBand = -1;
+static uint32_t stripLastMs;
+
+static int8_t stripBandFromUs(uint16_t us)
+{
+    if (us < LED_STRIP_OFF_US)
+    {
+        return 0;
+    }
+    if (us < LED_STRIP_FIRST_US)
+    {
+        return -1;
+    }
+    const uint16_t rel = us - LED_STRIP_FIRST_US;
+    const uint8_t idx = rel / LED_STRIP_BAND_US;
+    // Last colour (white) has no trailing guard; anything at or past 1920 stays white.
+    if (idx >= LED_STRIP_COLOUR_COUNT - 1)
+    {
+        return LED_STRIP_WHITE;
+    }
+    const uint16_t inBand = rel % LED_STRIP_BAND_US;
+    if (inBand >= LED_STRIP_BAND_US - LED_STRIP_GUARD_US)
+    {
+        return -1;
+    }
+    return (int8_t)(idx + 1);
+}
+
+static void stripPaint(uint8_t band)
+{
+    const RgbColor pix(LED_STRIP_RGB[band][0], LED_STRIP_RGB[band][1], LED_STRIP_RGB[band][2]);
+    ledStrip->ClearTo(pix, 0, MAX_LEDS - 1);
+    ledStrip->Show();
+}
+
+bool rgbLedStripInit(uint8_t pin)
+{
+    // One strip only. A second channel, GPIO0 (#3743), or the status LED pin is refused.
+    // Status LED pointers and pixelCount are left alone.
+    if (ledStrip || pin == 0 || pin == GPIO_PIN_LED_WS2812)
+    {
+        return false;
+    }
+
+    int port = 0;
+    if (GPIO_PIN_LED_WS2812 != UNDEF_PIN)
+    {
+#if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)
+        port = 1; // status LED keeps I2S0
+#else
+        return false; // C3/S2 have only I2S0, already used by the status LED
+#endif
+    }
+
+    ledStrip = new ESP32LedDriverGRB(MAX_LEDS, pin, port);
+    ledStrip->Begin();
+    ledStrip->ClearTo(RgbColor(0), 0, MAX_LEDS - 1);
+    ledStrip->Show();
+    stripBand = 0;
+    return true;
+}
+
+bool rgbLedStripSetUs(uint16_t us)
+{
+    if (!ledStrip)
+    {
+        return false;
+    }
+    const int8_t band = stripBandFromUs(us);
+    if (band < 0 || band == stripBand)
+    {
+        return true;
+    }
+    const uint32_t now = millis();
+    if ((uint32_t)(now - stripLastMs) < LED_STRIP_MIN_INTERVAL_MS)
+    {
+        return false;
+    }
+    stripLastMs = now;
+    stripBand = band;
+    stripPaint(band);
+    return true;
+}
+#endif
+
 static bool initialize()
 {
     if (GPIO_PIN_LED_WS2812 != UNDEF_PIN)

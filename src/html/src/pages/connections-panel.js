@@ -187,7 +187,7 @@ class ConnectionsPanel extends LitElement {
             }
             modes.push(features & 4 ? 'I2C SCL' : undefined)
             modes.push(features & 8 ? 'I2C SDA' : undefined)
-            modes.push(undefined)  // true PWM (not yet supported)
+            modes.push(features & 128 ? 'LED Strip' : undefined)
             modes.push(features & 32 ? 'Serial2 RX' : undefined)
             modes.push(features & 64 ? 'Serial2 TX' : undefined)
             const selectedMode = modes[mode] ? mode : 0

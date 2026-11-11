@@ -7,8 +7,6 @@
 #include "driver/i2s.h"
 #include "esp32rgb.h"
 
-constexpr auto I2S_NUM = I2S_NUM_0;
-
 #if defined(CONFIG_IDF_TARGET_ESP32S2)
 constexpr uint32_t SAMPLE_RATE = 375000;
 constexpr int MCLK = 48000000;
@@ -23,16 +21,13 @@ constexpr auto SAMPLE_RATE = 375000U;
 constexpr auto MCLK = 48000000;
 #endif
 
-constexpr auto DMA_BUF_LEN = 1024;
-constexpr auto DMA_BUF_COUNT = 2;
 constexpr auto I2S_BITS_PER_RGB_BIT = I2S_BITS_PER_SAMPLE_16BIT;
-constexpr auto BYTES_PER_LED = 24 * (I2S_BITS_PER_RGB_BIT / 8);
-constexpr auto MAX_LEDS = (DMA_BUF_LEN * DMA_BUF_COUNT - 4) / BYTES_PER_LED;
+static_assert(LED_BYTES_PER_LED == 24 * (I2S_BITS_PER_RGB_BIT / 8), "LED_BYTES_PER_LED must match 16-bit I2S packing");
 
-ESP32LedDriver::ESP32LedDriver(const int count, const int pin) : num_leds(count), gpio_pin(pin)
+ESP32LedDriver::ESP32LedDriver(const int count, const int pin, const int port) : num_leds(count), gpio_pin(pin), i2s_port(port)
 {
     num_leds = std::min(count, MAX_LEDS);
-    out_buffer_size = num_leds * BYTES_PER_LED;
+    out_buffer_size = num_leds * LED_BYTES_PER_LED;
     out_buffer = static_cast<uint16_t *>(heap_caps_malloc(out_buffer_size, MALLOC_CAP_DMA));
     memset(out_buffer, 0, out_buffer_size);
 }
@@ -51,8 +46,8 @@ void ESP32LedDriver::Begin() const
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = 0,
-        .dma_buf_count = DMA_BUF_COUNT,
-        .dma_buf_len = DMA_BUF_LEN,
+        .dma_buf_count = LED_I2S_DMA_BUF_COUNT,
+        .dma_buf_len = LED_I2S_DMA_BUF_LEN,
         .use_apll = true,
         .tx_desc_auto_clear = true,
         .fixed_mclk = MCLK,
@@ -66,20 +61,20 @@ void ESP32LedDriver::Begin() const
         .data_in_num = I2S_PIN_NO_CHANGE,
     };
 
-    i2s_driver_install(I2S_NUM, &i2s_config, 0, nullptr);
+    i2s_driver_install(static_cast<i2s_port_t>(i2s_port), &i2s_config, 0, nullptr);
     delay(1); // without this it fails to boot and gets stuck!
-    i2s_set_pin(I2S_NUM, &pin_config);
-    i2s_zero_dma_buffer(I2S_NUM);
-    i2s_stop(I2S_NUM);
+    i2s_set_pin(static_cast<i2s_port_t>(i2s_port), &pin_config);
+    i2s_zero_dma_buffer(static_cast<i2s_port_t>(i2s_port));
+    i2s_stop(static_cast<i2s_port_t>(i2s_port));
 }
 
 void ESP32LedDriver::Show() const
 {
     size_t bytes_written = 0;
-    i2s_stop(I2S_NUM);
-    if (i2s_write(I2S_NUM, out_buffer, out_buffer_size, &bytes_written, 0) == ESP_OK)
+    i2s_stop(static_cast<i2s_port_t>(i2s_port));
+    if (i2s_write(static_cast<i2s_port_t>(i2s_port), out_buffer, out_buffer_size, &bytes_written, 0) == ESP_OK)
     {
-        i2s_start(I2S_NUM);
+        i2s_start(static_cast<i2s_port_t>(i2s_port));
     }
 }
 

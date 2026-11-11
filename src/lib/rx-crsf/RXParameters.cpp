@@ -203,7 +203,8 @@ static commandParameter luaBindMode = {
 
 static uint8_t sanitizePwmMode(uint8_t mode)
 {
-    return OPT_PWM_OUT_ONLY && mode >= somSerial ? som50Hz : mode;
+    // somPwm (LED Strip) is an output mode, not a serial mode
+    return OPT_PWM_OUT_ONLY && mode >= somSerial && mode != somPwm ? som50Hz : mode;
 }
 
 void RXEndpoint::luaparamMappingChannelOut(propertiesCommon *item, uint8_t arg)
@@ -216,6 +217,7 @@ void RXEndpoint::luaparamMappingChannelOut(propertiesCommon *item, uint8_t arg)
 #if defined(PLATFORM_ESP32)
     bool serial1rxAssigned = false;
     bool serial1txAssigned = false;
+    bool ledStripAssigned = false;
 #endif
 
     const char *no1Option    = ";";
@@ -255,6 +257,9 @@ void RXEndpoint::luaparamMappingChannelOut(propertiesCommon *item, uint8_t arg)
 
       if (mode == somSerial1TX)
         serial1txAssigned = true;
+
+      if (mode == somPwm)
+        ledStripAssigned = true;
 #endif
     }
 
@@ -338,8 +343,30 @@ void RXEndpoint::luaparamMappingChannelOut(propertiesCommon *item, uint8_t arg)
     }
     strcat(pwmModes, pModeString);
 
+#if defined(PLATFORM_ESP32)
+    // somPwm reused as LED Strip. Keep in sync with devWIFI.cpp feature bit 128:
+    // not GPIO0 (#3743), not the status LED pin, and not on C3/S2 when a status LED
+    // already owns I2S0. Only one strip channel; hide it on other pins once assigned.
+    // The channel that already has the mode still offers it so the selector can display it.
+    const auto ledStripPin = GPIO_PIN_PWM_OUTPUTS[arg-1];
+    bool ledStripOffered = false;
+    if (ledStripPin != 0 && ledStripPin != GPIO_PIN_LED_WS2812 && !ledStripAssigned)
+    {
+#if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)
+        ledStripOffered = true;
+#else
+        ledStripOffered = GPIO_PIN_LED_WS2812 == UNDEF_PIN;
+#endif
+    }
+    if ((eServoOutputMode)config.GetPwmChannel(arg-1)->val.mode == somPwm)
+    {
+        ledStripOffered = true;
+    }
+    strcat(pwmModes, ledStripOffered ? ";LED Strip" : no1Option);
+#else
     // nothing to do for unsupported somPwm mode
     strcat(pwmModes, no1Option);
+#endif
 
 #if defined(PLATFORM_ESP32)
     // secondary Serial pins (2 options)

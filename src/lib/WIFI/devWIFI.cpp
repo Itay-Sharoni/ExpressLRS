@@ -541,6 +541,28 @@ static void GetConfiguration(AsyncWebServerRequest *request)
       }
       #if defined(PLATFORM_ESP32)
       if (pin != 0) features |= 16; // DShot supported on all pins but GPIO0
+      // LED Strip (feature 128). Keep in sync with luaparamMappingChannelOut:
+      // not GPIO0 (#3743), not the status LED pin, and not on C3/S2 when a status LED
+      // already owns I2S0. Only one strip channel; hide it on other pins once assigned.
+      // The channel that already has the mode still advertises it so the selector can display it.
+      bool ledStripAssigned = false;
+      const auto thisMode = (eServoOutputMode)config.GetPwmChannel(ch)->val.mode;
+      for (int other = 0; other < GPIO_PIN_PWM_OUTPUTS_COUNT; ++other)
+      {
+        if (other != ch && (eServoOutputMode)config.GetPwmChannel(other)->val.mode == somPwm)
+        {
+          ledStripAssigned = true;
+        }
+      }
+      if (thisMode == somPwm ||
+          (pin != 0 && pin != GPIO_PIN_LED_WS2812 && !ledStripAssigned))
+      {
+#if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)
+        features |= 128;
+#else
+        if (GPIO_PIN_LED_WS2812 == UNDEF_PIN || thisMode == somPwm) features |= 128;
+#endif
+      }
       if (!OPT_PWM_OUT_ONLY)
       {
         if (pin == GPIO_PIN_SERIAL1_RX) features |= 32;  // SERIAL1 RX supported (only on this pin)
