@@ -1,11 +1,8 @@
 #pragma once
 #include <Arduino.h>
 
-// I2S DMA cap: two buffers of 1024 16-bit stereo samples, 48 bytes per LED.
-static constexpr int LED_I2S_DMA_BUF_LEN = 1024;
-static constexpr int LED_I2S_DMA_BUF_COUNT = 2;
-static constexpr int LED_BYTES_PER_LED = 48;
-static constexpr int MAX_LEDS = (LED_I2S_DMA_BUF_LEN * LED_I2S_DMA_BUF_COUNT - 4) / LED_BYTES_PER_LED;
+// Defined in esp32rgb.cpp as (DMA_BUF_LEN * DMA_BUF_COUNT - 4) / BYTES_PER_LED
+extern const int MAX_LEDS;
 
 class RgbColor
 {
@@ -24,7 +21,7 @@ public:
     ESP32LedDriver(int count, int pin, int port = 0);
     virtual ~ESP32LedDriver();
 
-    void Begin() const;
+    bool Begin() const;
     void Show() const;
     void ClearTo(RgbColor color, int first, int last);
     virtual void SetPixelColor(int indexPixel, RgbColor color) = 0;

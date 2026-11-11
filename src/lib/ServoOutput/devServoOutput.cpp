@@ -297,6 +297,17 @@ static bool initialize()
         }
 #endif
         servoPins[ch] = pin;
+#if defined(PLATFORM_ESP32)
+        if (mode == somPwm)
+        {
+            // Start the strip at boot, cleared off, so it is not left undefined until first connect.
+            if (pin != UNDEF_PIN && !rgbLedStripInit(pin))
+            {
+                servoPins[ch] = UNDEF_PIN;
+            }
+            continue;
+        }
+#endif
         // Initialize all servos to low ASAP
         if (pin != UNDEF_PIN)
         {
@@ -321,6 +332,10 @@ static int event()
     if (connectionState == wifiUpdate)
     {
         servosEnterFailsafe();
+#if defined(PLATFORM_ESP32)
+        // Servo timeouts stop in WiFi mode; force any pending failsafe colour out now.
+        rgbLedStripFlush(true);
+#endif
         for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
         {
             if (pwmChannels[ch] != -1)
@@ -357,13 +372,6 @@ static int event()
                 pwmChannels[ch] = PWM.allocate(servoPins[ch], frequency);
             }
 #if defined(PLATFORM_ESP32)
-            else if ((eServoOutputMode)chConfig->val.mode == somPwm && servoPins[ch] != UNDEF_PIN)
-            {
-                if (!rgbLedStripInit(servoPins[ch]))
-                {
-                    servoPins[ch] = UNDEF_PIN;
-                }
-            }
             else if ((eServoOutputMode)chConfig->val.mode == somDShot || (eServoOutputMode)chConfig->val.mode == somDShot3D)
             {
                 dshotInstances[ch]->begin(DSHOT300, false); // Set DShot protocol and bidirectional DShot bool
@@ -377,6 +385,9 @@ static int event()
 static int timeout()
 {
     servosUpdate(millis());
+#if defined(PLATFORM_ESP32)
+    rgbLedStripFlush(false);
+#endif
     // When disconnected, return a timeout to feed the ISR watchdog for the PWM signals
     return connectionState == disconnected ? DISCONNECTED_UPDATE_MS : DURATION_IMMEDIATELY;
 }

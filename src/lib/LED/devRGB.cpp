@@ -375,6 +375,7 @@ static constexpr uint8_t LED_STRIP_WHITE = LED_STRIP_BAND_COUNT - 1;
 
 static ESP32LedDriverGRB *ledStrip;
 static int8_t stripBand = -1;
+static int8_t stripPendingBand = -1;
 static uint32_t stripLastMs;
 
 static int8_t stripBandFromUs(uint16_t us)
@@ -409,11 +410,24 @@ static void stripPaint(uint8_t band)
     ledStrip->Show();
 }
 
+bool rgbLedStripAllowed(int pin)
+{
+    // Not GPIO0 (#3743), not the status LED pin, and not on C3/S2 when a status LED already owns I2S0.
+    if (pin == 0 || pin == GPIO_PIN_LED_WS2812)
+    {
+        return false;
+    }
+#if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)
+    return true;
+#else
+    return GPIO_PIN_LED_WS2812 == UNDEF_PIN;
+#endif
+}
+
 bool rgbLedStripInit(uint8_t pin)
 {
-    // One strip only. A second channel, GPIO0 (#3743), or the status LED pin is refused.
-    // Status LED pointers and pixelCount are left alone.
-    if (ledStrip || pin == 0 || pin == GPIO_PIN_LED_WS2812)
+    // One strip only. Status LED pointers and pixelCount are left alone.
+    if (ledStrip || !rgbLedStripAllowed(pin))
     {
         return false;
     }
@@ -421,19 +435,38 @@ bool rgbLedStripInit(uint8_t pin)
     int port = 0;
     if (GPIO_PIN_LED_WS2812 != UNDEF_PIN)
     {
-#if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)
-        port = 1; // status LED keeps I2S0
-#else
-        return false; // C3/S2 have only I2S0, already used by the status LED
-#endif
+        port = 1; // ESP32/S3 only; allowed() already rejected C3/S2 in this case
     }
 
     ledStrip = new ESP32LedDriverGRB(MAX_LEDS, pin, port);
-    ledStrip->Begin();
+    if (!ledStrip->Begin())
+    {
+        delete ledStrip;
+        ledStrip = nullptr;
+        return false;
+    }
     ledStrip->ClearTo(RgbColor(0), 0, MAX_LEDS - 1);
     ledStrip->Show();
     stripBand = 0;
+    stripPendingBand = -1;
     return true;
+}
+
+void rgbLedStripFlush(bool force)
+{
+    if (!ledStrip || stripPendingBand < 0)
+    {
+        return;
+    }
+    const uint32_t now = millis();
+    if (!force && (uint32_t)(now - stripLastMs) < LED_STRIP_MIN_INTERVAL_MS)
+    {
+        return;
+    }
+    stripLastMs = now;
+    stripBand = stripPendingBand;
+    stripPendingBand = -1;
+    stripPaint(stripBand);
 }
 
 bool rgbLedStripSetUs(uint16_t us)
@@ -443,19 +476,16 @@ bool rgbLedStripSetUs(uint16_t us)
         return false;
     }
     const int8_t band = stripBandFromUs(us);
-    if (band < 0 || band == stripBand)
+    if (band >= 0)
+    {
+        stripPendingBand = (band != stripBand) ? band : (int8_t)-1;
+    }
+    if (stripPendingBand < 0)
     {
         return true;
     }
-    const uint32_t now = millis();
-    if ((uint32_t)(now - stripLastMs) < LED_STRIP_MIN_INTERVAL_MS)
-    {
-        return false;
-    }
-    stripLastMs = now;
-    stripBand = band;
-    stripPaint(band);
-    return true;
+    rgbLedStripFlush(false);
+    return stripPendingBand < 0;
 }
 #endif
 

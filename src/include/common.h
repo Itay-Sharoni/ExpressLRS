@@ -204,7 +204,7 @@ enum eServoOutputMode : uint8_t
     somSerial,      // 10:  primary Serial
     somSCL,         // 11: I2C clock signal
     somSDA,         // 12: I2C data line
-    somPwm,         // 13: LED Strip (WS2812); reserved true-PWM slot unused
+    somPwm,         // 13: LED Strip (WS2812, ESP32 only)
     somSerial1RX,   // 14: secondary Serial RX
     somSerial1TX,   // 15: secondary Serial TX
 };

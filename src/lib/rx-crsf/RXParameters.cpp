@@ -6,6 +6,9 @@
 #include "config.h"
 #include "deferred.h"
 #include "devServoOutput.h"
+#if defined(PLATFORM_ESP32)
+#include "devLED.h"
+#endif
 #include "helpers.h"
 #include "rxtx_intf.h"
 #include "logging.h"
@@ -30,6 +33,8 @@ char strPowerLevels[] = "10;25;50;100;250;500;1000;2000;MatchTX ";
 char strPowerLevels[] = "10;25;50;100;250;500;1000;2000;MatchTX ";
 #endif
 static char modelString[] = "000";
+// Exact fit once ";LED Strip" is appended on ESP32. Do not grow this buffer
+// (the extra bytes would also land on ESP8285).
 static char pwmModes[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHzDuty;On/Off;DShot;DShot 3D;Serial RX;Serial TX;I2C SCL;I2C SDA;Serial2 RX;Serial2 TX";
 
 static selectionParameter luaSerialProtocol = {
@@ -344,20 +349,9 @@ void RXEndpoint::luaparamMappingChannelOut(propertiesCommon *item, uint8_t arg)
     strcat(pwmModes, pModeString);
 
 #if defined(PLATFORM_ESP32)
-    // somPwm reused as LED Strip. Keep in sync with devWIFI.cpp feature bit 128:
-    // not GPIO0 (#3743), not the status LED pin, and not on C3/S2 when a status LED
-    // already owns I2S0. Only one strip channel; hide it on other pins once assigned.
-    // The channel that already has the mode still offers it so the selector can display it.
+    // The channel that already has LED Strip still offers it so the selector can display it.
     const auto ledStripPin = GPIO_PIN_PWM_OUTPUTS[arg-1];
-    bool ledStripOffered = false;
-    if (ledStripPin != 0 && ledStripPin != GPIO_PIN_LED_WS2812 && !ledStripAssigned)
-    {
-#if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S3)
-        ledStripOffered = true;
-#else
-        ledStripOffered = GPIO_PIN_LED_WS2812 == UNDEF_PIN;
-#endif
-    }
+    bool ledStripOffered = rgbLedStripAllowed(ledStripPin) && !ledStripAssigned;
     if ((eServoOutputMode)config.GetPwmChannel(arg-1)->val.mode == somPwm)
     {
         ledStripOffered = true;

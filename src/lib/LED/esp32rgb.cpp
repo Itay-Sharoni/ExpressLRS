@@ -21,15 +21,21 @@ constexpr auto SAMPLE_RATE = 375000U;
 constexpr auto MCLK = 48000000;
 #endif
 
+constexpr auto DMA_BUF_LEN = 1024;
+constexpr auto DMA_BUF_COUNT = 2;
 constexpr auto I2S_BITS_PER_RGB_BIT = I2S_BITS_PER_SAMPLE_16BIT;
-static_assert(LED_BYTES_PER_LED == 24 * (I2S_BITS_PER_RGB_BIT / 8), "LED_BYTES_PER_LED must match 16-bit I2S packing");
+constexpr auto BYTES_PER_LED = 24 * (I2S_BITS_PER_RGB_BIT / 8);
+const int MAX_LEDS = (DMA_BUF_LEN * DMA_BUF_COUNT - 4) / BYTES_PER_LED;
 
 ESP32LedDriver::ESP32LedDriver(const int count, const int pin, const int port) : num_leds(count), gpio_pin(pin), i2s_port(port)
 {
     num_leds = std::min(count, MAX_LEDS);
-    out_buffer_size = num_leds * LED_BYTES_PER_LED;
+    out_buffer_size = num_leds * BYTES_PER_LED;
     out_buffer = static_cast<uint16_t *>(heap_caps_malloc(out_buffer_size, MALLOC_CAP_DMA));
-    memset(out_buffer, 0, out_buffer_size);
+    if (out_buffer)
+    {
+        memset(out_buffer, 0, out_buffer_size);
+    }
 }
 
 ESP32LedDriver::~ESP32LedDriver()
@@ -37,8 +43,13 @@ ESP32LedDriver::~ESP32LedDriver()
     heap_caps_free(out_buffer);
 }
 
-void ESP32LedDriver::Begin() const
+bool ESP32LedDriver::Begin() const
 {
+    if (!out_buffer)
+    {
+        return false;
+    }
+
     constexpr i2s_config_t i2s_config = {
         .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX),
         .sample_rate = SAMPLE_RATE,
@@ -46,8 +57,8 @@ void ESP32LedDriver::Begin() const
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = 0,
-        .dma_buf_count = LED_I2S_DMA_BUF_COUNT,
-        .dma_buf_len = LED_I2S_DMA_BUF_LEN,
+        .dma_buf_count = DMA_BUF_COUNT,
+        .dma_buf_len = DMA_BUF_LEN,
         .use_apll = true,
         .tx_desc_auto_clear = true,
         .fixed_mclk = MCLK,
@@ -66,10 +77,15 @@ void ESP32LedDriver::Begin() const
     i2s_set_pin(static_cast<i2s_port_t>(i2s_port), &pin_config);
     i2s_zero_dma_buffer(static_cast<i2s_port_t>(i2s_port));
     i2s_stop(static_cast<i2s_port_t>(i2s_port));
+    return true;
 }
 
 void ESP32LedDriver::Show() const
 {
+    if (!out_buffer)
+    {
+        return;
+    }
     size_t bytes_written = 0;
     i2s_stop(static_cast<i2s_port_t>(i2s_port));
     if (i2s_write(static_cast<i2s_port_t>(i2s_port), out_buffer, out_buffer_size, &bytes_written, 0) == ESP_OK)
@@ -99,7 +115,7 @@ static const int bit_order[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 
 void ESP32LedDriverGRB::SetPixelColor(const int indexPixel, const RgbColor color)
 {
-    if (indexPixel < num_leds)
+    if (out_buffer && indexPixel < num_leds)
     {
         const auto loc = indexPixel * 24;
         for(auto bit_pos = 0 ; bit_pos < 8 ; bit_pos++)
@@ -114,7 +130,7 @@ void ESP32LedDriverGRB::SetPixelColor(const int indexPixel, const RgbColor color
 
 void ESP32LedDriverRGB::SetPixelColor(const int indexPixel, const RgbColor color)
 {
-    if (indexPixel < num_leds)
+    if (out_buffer && indexPixel < num_leds)
     {
         const auto loc = indexPixel * 24;
         for(auto bit_pos = 0 ; bit_pos < 8 ; bit_pos++)
